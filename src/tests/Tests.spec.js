@@ -4,30 +4,38 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { Trend, Rate } from 'k6/metrics';
 
-export const getContactsDuration = new Trend('get_contacts', true);
-export const RateContentOK = new Rate('content_OK');
+// Métricas personalizadas
+export const getCryptoPriceDuration = new Trend(
+  'get_crypto_price_duration',
+  true
+); // Duração da chamada GET
+export const successRate = new Rate('success_rate'); // Taxa de respostas bem-sucedidas
 
+// Configuração de carga
 export const options = {
   thresholds: {
-    http_req_failed: ['rate<0.30'],
-    get_contacts: ['p(99)<500'],
-    content_OK: ['rate>0.95']
+    get_crypto_price_duration: ['p(95)<5700'], // 95% das respostas abaixo de 5700ms
+    success_rate: ['rate>0.88'] // Menos de 12% das requisições com erro
   },
   stages: [
-    { duration: '10s', target: 5 },
-    { duration: '20s', target: 15 }
+    { duration: '1m', target: 10 }, // Iniciar com 10 VUs em 1 minuto
+    { duration: '3m', target: 300 }, // Aumentar para 300 VUs em 3 minutos
+    { duration: '1m', target: 0 } // Encerrar reduzindo para 0 VUs em 1 minuto
   ]
 };
 
+// Geração de relatórios
 export function handleSummary(data) {
   return {
-    './src/output/index.html': htmlReport(data),
-    stdout: textSummary(data, { indent: ' ', enableColors: true })
+    './src/output/index.html': htmlReport(data), // Relatório em HTML
+    stdout: textSummary(data, { indent: ' ', enableColors: true }) // Resumo no console
   };
 }
 
+// Teste principal
 export default function () {
-  const baseUrl = 'https://test.k6.io/';
+  const baseUrl = 'https://api.coingecko.com/api/v3';
+  const endpoint = '/simple/price?ids=bitcoin&vs_currencies=usd';
 
   const params = {
     headers: {
@@ -37,13 +45,19 @@ export default function () {
 
   const OK = 200;
 
-  const res = http.get(`${baseUrl}`, params);
+  // Chamada GET para obter o preço do Bitcoin
+  const res = http.get(`${baseUrl}${endpoint}`, params);
 
-  getContactsDuration.add(res.timings.duration);
+  // Adicionar o tempo de duração da requisição às métricas
+  getCryptoPriceDuration.add(res.timings.duration);
 
-  RateContentOK.add(res.status === OK);
+  // Adicionar a taxa de sucesso às métricas
+  successRate.add(res.status === OK);
 
+  // Validações
   check(res, {
-    'GET Contacts - Status 200': () => res.status === OK
+    'GET Crypto Price - Status 200': () => res.status === OK,
+    'GET Crypto Price - Resposta não vazia': () =>
+      res.json('bitcoin.usd') !== undefined
   });
 }
